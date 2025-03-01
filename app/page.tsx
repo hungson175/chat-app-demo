@@ -22,7 +22,7 @@ type Message = {
 }
 
 // Add this constant at the top level
-const BACKEND_URL = 'http://3.0.18.115:8000'
+const BACKEND_URL = 'https://fin-demo.xyz'
 // const BACKEND_URL = 'http://localhost:8000'
 const BOT_NAME = 'LTI-Bot'
 
