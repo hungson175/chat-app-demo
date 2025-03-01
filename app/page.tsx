@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import axios from 'axios'
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer"
 
@@ -37,9 +38,11 @@ const EXAMPLE_QUESTIONS = [
   "FPT đầu tư dài hạn được không?",
   "Đây có phải thời điểm tốt để xuống tiền ko mài ?",
   "30 triệu nên đầu tư ngành nào?",
-  "Cổ cánh ngành nào ngon trong 5 năm tới?",
-  "Nên chọn VCB hay BID?"
+  "Những ngành nào có triển vọng trong 5 năm tới?",
+  "Nên chọn VCB hay MBB?"
 ]
+
+const MAX_QUESTIONS = 8
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([
@@ -57,9 +60,12 @@ export default function Chat() {
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
   const [elapsedTime, setElapsedTime] = useState(0)
   const [conversationId, setConversationId] = useState<string | undefined>()
+  const [questionCount, setQuestionCount] = useState(0)
+  const [showLimitDialog, setShowLimitDialog] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<NodeJS.Timeout>()
+  const inputRef = useRef<HTMLInputElement>(null)
 
   // Clear chat session
   const clearSession = () => {
@@ -75,7 +81,14 @@ export default function Chat() {
     setIsLoading(false)
     setShouldAutoScroll(true)
     setConversationId(undefined)
+    setQuestionCount(0)
+    setShowLimitDialog(false)
+    // Focus input after clearing
+    setTimeout(() => inputRef.current?.focus(), 100)
   }
+
+  // Check if question limit is reached
+  const isLimitReached = () => questionCount >= MAX_QUESTIONS
 
   // Toggle thinking expanded state for a message
   const toggleThinking = (messageId: string) => {
@@ -120,12 +133,13 @@ export default function Chat() {
   // Handle form submission with thinking process
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading) return
+    if (!input.trim() || isLoading || isLimitReached()) return
 
     setIsLoading(true)
     setElapsedTime(0)
+    setQuestionCount(prev => prev + 1)
 
-    const tempId = crypto.randomUUID() // This ID is only for frontend message management
+    const tempId = crypto.randomUUID()
     // Add user message with empty thinking
     const userMessage: Message = {
       id: tempId,
@@ -138,6 +152,9 @@ export default function Chat() {
     }
     setMessages((prev) => [...prev, userMessage])
     setInput("")
+
+    // Keep focus on input
+    inputRef.current?.focus()
 
     try {
       // Call the FastAPI backend - only send necessary data
@@ -185,6 +202,8 @@ export default function Chat() {
       setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
+      // Ensure focus is maintained even after loading
+      inputRef.current?.focus()
     }
   }
 
@@ -213,30 +232,51 @@ export default function Chat() {
     }
   }, [input])
 
+  // Effect to show limit dialog when max questions reached
+  useEffect(() => {
+    if (isLimitReached()) {
+      setShowLimitDialog(true)
+    }
+  }, [questionCount])
+
+  // Auto focus input on component mount
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
       <header className="flex items-center justify-between p-4 border-b">
         <div className="text-xl font-bold">{BOT_NAME}</div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center">
-            <Button 
-              variant="ghost"
-              className="border rounded-md px-4 py-2 flex items-center gap-2 hover:bg-gray-100"
-              onClick={clearSession}
-            >
-              <Plus className="h-4 w-4" />
-              <span>New Chat</span>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Button 
+                variant="ghost"
+                className="border rounded-md px-4 py-2 flex items-center gap-2 hover:bg-gray-100"
+                onClick={clearSession}
+              >
+                <Plus className="h-4 w-4" />
+                <span>New Chat</span>
+              </Button>
+              <div className="absolute -right-2 -top-2 flex items-center justify-center w-6 h-6 bg-blue-500 text-white text-xs font-medium rounded-full">
+                {MAX_QUESTIONS - questionCount}
+              </div>
+            </div>
+            <Button variant="ghost" size="icon">
+              <div className="h-8 w-8 rounded-full bg-gray-200" />
             </Button>
           </div>
-          <Button variant="ghost" size="icon">
-            <div className="h-8 w-8 rounded-full bg-gray-200" />
-          </Button>
         </div>
       </header>
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-auto p-4" ref={chatContainerRef} onScroll={handleScroll}>
+      <div 
+        className="flex-1 overflow-auto p-4" 
+        ref={chatContainerRef} 
+        onScroll={handleScroll}
+      >
         <div className="max-w-3xl mx-auto space-y-4">
           {messages.map((message) => (
             <div key={message.id} className="space-y-2">
@@ -250,13 +290,14 @@ export default function Chat() {
                       <>
                         <MarkdownRenderer content={message.content} />
                         {message.id === "welcome" && (
-                          <div className="mt-6 flex flex-col gap-3">
+                          <div className={`mt-6 flex flex-col gap-3 ${isLimitReached() ? 'opacity-50 pointer-events-none' : ''}`}>
                             {EXAMPLE_QUESTIONS.map((question, index) => (
                               <Button
                                 key={index}
                                 variant="ghost"
                                 className="w-full h-12 justify-start text-left border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-all text-gray-600 hover:text-blue-700 rounded-lg shadow-sm"
                                 onClick={() => {
+                                  if (isLimitReached()) return;
                                   const fakeEvent = { preventDefault: () => {} } as React.FormEvent
                                   const question = EXAMPLE_QUESTIONS[index]
                                   // Create and submit user message directly
@@ -274,6 +315,7 @@ export default function Chat() {
                                   setInput("")
                                   setIsLoading(true)
                                   setElapsedTime(0)
+                                  setQuestionCount(prev => prev + 1)
                                   
                                   // Call API directly
                                   axios.post(`${BACKEND_URL}/chat`, {
@@ -323,6 +365,7 @@ export default function Chat() {
                                     setIsLoading(false)
                                   })
                                 }}
+                                disabled={isLimitReached()}
                               >
                                 <div className="flex items-center w-full">
                                   <Send className="h-4 w-4 shrink-0 text-blue-500 mr-3" />
@@ -391,21 +434,22 @@ export default function Chat() {
       </div>
 
       {/* Input Area */}
-      <div className="p-4 border-t">
+      <div className={`p-4 border-t ${isLimitReached() ? 'opacity-50' : ''}`}>
         <form onSubmit={onSubmit} className="max-w-3xl mx-auto flex items-center gap-3">
           <Input
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={`How can ${BOT_NAME} help?`}
             className="flex-1 text-base px-4 h-14"
-            disabled={isLoading}
+            disabled={isLoading || isLimitReached()}
           />
           <Button 
             type="submit" 
             variant="ghost" 
             size="icon"
             className="h-14 w-14 shrink-0 flex items-center justify-center" 
-            disabled={isLoading || !input.trim()}
+            disabled={isLoading || !input.trim() || isLimitReached()}
           >
             {isLoading ? (
               <Loader2 className="h-6 w-6 animate-spin" />
@@ -415,6 +459,26 @@ export default function Chat() {
           </Button>
         </form>
       </div>
+
+      {/* Limit Reached Dialog */}
+      <Dialog open={showLimitDialog} onOpenChange={setShowLimitDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Giới hạn câu hỏi</DialogTitle>
+            <DialogDescription>
+              Đây là bản demo, chỉ cho phép {MAX_QUESTIONS} câu hỏi mỗi phiên chat. Xin cảm ơn bạn đã thử nghiệm!
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setShowLimitDialog(false)}>
+              Đóng
+            </Button>
+            <Button onClick={clearSession}>
+              Chat mới
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
