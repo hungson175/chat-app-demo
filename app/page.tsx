@@ -23,8 +23,8 @@ type Message = {
 }
 
 // Add this constant at the top level
-const BACKEND_URL = 'https://fin-demo.xyz'
-// const BACKEND_URL = 'http://localhost:8000'
+// const BACKEND_URL = 'https://fin-demo.xyz'
+const BACKEND_URL = 'http://localhost:8000'
 const BOT_NAME = 'LTI-Bot'
 
 const WELCOME_MESSAGE = `Chào mừng bạn đến với Trợ lý Đầu tư AI! Tôi chỉ tư vấn chứng khoán dài hạn.
