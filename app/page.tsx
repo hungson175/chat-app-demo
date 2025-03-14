@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { ChevronDown, Lightbulb, Mic, Plus, Search, Loader2, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -25,7 +25,11 @@ type Message = {
 // Add this constant at the top level
 // const BACKEND_URL = 'https://fin-demo.xyz'
 const BACKEND_URL = 'http://localhost:8000'
+// const WS_URL = 'ws://localhost:8000/ws/chat'
+const WS_URL = 'ws://fin-demo.xyz/ws/chat'
 const BOT_NAME = 'LTI-Bot'
+const MAX_RETRIES = 3
+const RETRY_DELAY = 1000
 
 const WELCOME_MESSAGE = `Chào mừng bạn đến với Trợ lý Đầu tư AI! Tôi chỉ tư vấn chứng khoán dài hạn.
 Bạn có thể hỏi tôi tất tần tật về đầu tư dài hạn các cổ phiếu trong VN100.
@@ -66,8 +70,164 @@ export default function Chat() {
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<NodeJS.Timeout>()
   const inputRef = useRef<HTMLInputElement>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectAttempts = useRef(0)
+  const [wsReady, setWsReady] = useState(false)
 
-  // Clear chat session
+  // Initialize WebSocket connection
+  const connectWebSocket = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
+    console.log('Attempting to connect to WebSocket...')
+    const ws = new WebSocket(WS_URL)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      console.log('WebSocket connected')
+      setWsReady(true)
+      reconnectAttempts.current = 0
+    }
+
+    ws.onclose = () => {
+      console.log('WebSocket closed')
+      setWsReady(false)
+      wsRef.current = null
+
+      // Attempt to reconnect if we haven't exceeded max retries
+      if (reconnectAttempts.current < MAX_RETRIES) {
+        reconnectAttempts.current += 1
+        console.log(`Reconnecting... Attempt ${reconnectAttempts.current}`)
+        setTimeout(connectWebSocket, RETRY_DELAY)
+      }
+    }
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data)
+      console.log('[WebSocket] Received message:', {
+        type: data.type,
+        content: data.type === 'thinking' ? data.content.substring(0, 50) + '...' : 'final response',
+        timestamp: new Date().toISOString()
+      })
+      
+      switch (data.type) {
+        case 'thinking':
+          // Update the thinking content of the latest user message
+          setMessages(prev => {
+            // Find the last message that is currently thinking
+            const lastMessage = prev[prev.length - 1]
+            console.log('[Thinking Update] Current state:', {
+              lastMessageId: lastMessage?.id,
+              isThinking: lastMessage?.isThinking,
+              existingThinking: lastMessage?.thinking?.split('\n').length || 0,
+              newContent: data.content.substring(0, 50) + '...'
+            })
+            
+            if (!lastMessage || !lastMessage.isThinking) {
+              console.warn('[Thinking Update] No thinking message found or message not in thinking state')
+              return prev
+            }
+            
+            return prev.map((msg, idx) => {
+              if (idx === prev.length - 1) {
+                // Only update the most recent message
+                const currentThinking = msg.thinking || ""
+                const newThinking = data.content.trim()
+                console.log('[Thinking Update] Updating message:', {
+                  messageId: msg.id,
+                  currentThinkingLines: currentThinking.split('\n').length,
+                  newContentLength: newThinking.length
+                })
+                return {
+                  ...msg,
+                  thinking: currentThinking + (currentThinking ? "\n" : "") + newThinking
+                }
+              }
+              return msg
+            })
+          })
+          break
+          
+        case 'final':
+          console.log('[Final Response] Processing final response', {
+            conversationId: data.conversation_id,
+            contentPreview: data.content.substring(0, 50) + '...'
+          })
+          
+          // Store conversation_id for next messages
+          if (data.conversation_id) {
+            setConversationId(data.conversation_id)
+          }
+          
+          // Update the last user message to stop thinking
+          setMessages(prev => {
+            const lastUserMessageIndex = [...prev].reverse().findIndex(m => m.role === 'user' && m.isThinking)
+            console.log('[Final Response] Finding last thinking message:', {
+              messageFound: lastUserMessageIndex !== -1,
+              totalMessages: prev.length
+            })
+            
+            if (lastUserMessageIndex === -1) return prev
+            
+            const actualIndex = prev.length - 1 - lastUserMessageIndex
+            const newMessages = prev.map((msg, idx) => {
+              if (idx === actualIndex) {
+                console.log('[Final Response] Stopping thinking for message:', {
+                  messageId: msg.id,
+                  thinkingContent: msg.thinking?.split('\n').length || 0
+                })
+                return {
+                  ...msg,
+                  isThinking: false,
+                  isThinkingExpanded: false
+                }
+              }
+              return msg
+            })
+            
+            // Add bot response
+            return [...newMessages, {
+              id: crypto.randomUUID(),
+              content: data.content,
+              role: "assistant",
+              thinking: "",
+              isThinkingExpanded: false,
+              isThinking: false
+            }]
+          })
+          setIsLoading(false)
+          break
+          
+        case 'error':
+          console.error('WebSocket error:', data.content)
+          setMessages(prev => [...prev, {
+            id: crypto.randomUUID(),
+            content: "Sorry, there was an error processing your request. Please try again.",
+            role: "assistant",
+            thinking: "",
+            isThinkingExpanded: false,
+            isThinking: false
+          }])
+          setIsLoading(false)
+          break
+      }
+    }
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error)
+    }
+  }, [])
+
+  // Initialize WebSocket connection when component mounts
+  useEffect(() => {
+    connectWebSocket()
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
+  }, [connectWebSocket])
+
+  // Clear chat session - update to also reset WebSocket
   const clearSession = () => {
     setMessages([{
       id: "welcome",
@@ -83,6 +243,14 @@ export default function Chat() {
     setConversationId(undefined)
     setQuestionCount(0)
     setShowLimitDialog(false)
+    
+    // Reset WebSocket connection
+    if (wsRef.current) {
+      wsRef.current.close()
+    }
+    reconnectAttempts.current = 0
+    connectWebSocket()
+    
     // Focus input after clearing
     setTimeout(() => inputRef.current?.focus(), 100)
   }
@@ -130,83 +298,6 @@ export default function Chat() {
     }
   }, [messages])
 
-  // Handle form submission with thinking process
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim() || isLoading || isLimitReached()) return
-
-    setIsLoading(true)
-    setElapsedTime(0)
-    setQuestionCount(prev => prev + 1)
-
-    const tempId = crypto.randomUUID()
-    // Add user message with empty thinking
-    const userMessage: Message = {
-      id: tempId,
-      content: input.trim(),
-      role: "user",
-      thinking: "",
-      isThinkingExpanded: true,
-      isThinking: true,
-      thinkingStartTime: Date.now()
-    }
-    setMessages((prev) => [...prev, userMessage])
-    setInput("")
-
-    // Keep focus on input
-    inputRef.current?.focus()
-
-    try {
-      // Call the FastAPI backend - only send necessary data
-      const response = await axios.post(`${BACKEND_URL}/chat`, {
-        message: input.trim(), // Just send the message content
-        conversation_id: conversationId // And conversation ID if it exists
-      })
-
-      // Update user message to stop thinking
-      setMessages((prev) =>
-        prev.map((msg) => (msg.id === tempId ? { ...msg, isThinking: false, isThinkingExpanded: false } : msg))
-      )
-
-      // Store the conversation ID from the first response
-      if (!conversationId && response.data.conversation_id) {
-        setConversationId(response.data.conversation_id)
-      }
-
-      // Add bot message and ensure scroll
-      const botMessage: Message = {
-        id: crypto.randomUUID(), // Frontend-only ID for React management
-        content: response.data.response,
-        role: "assistant",
-        thinking: "",
-        isThinkingExpanded: false,
-        isThinking: false
-      }
-      
-      // Update messages and ensure scroll is enabled for the final response
-      setMessages((prev) => {
-        setShouldAutoScroll(true)
-        return [...prev, botMessage]
-      })
-    } catch (error) {
-      console.error('Error calling backend:', error)
-      // Add error message
-      const errorMessage: Message = {
-        id: crypto.randomUUID(), // Frontend-only ID
-        content: "Sorry, there was an error processing your request. Please try again.",
-        role: "assistant",
-        thinking: "",
-        isThinkingExpanded: false,
-        isThinking: false
-      }
-      setMessages((prev) => [...prev, errorMessage])
-    } finally {
-      setIsLoading(false)
-      // Ensure focus is maintained even after loading
-      inputRef.current?.focus()
-    }
-  }
-
   // Handle scroll events to detect when user scrolls up
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const div = e.currentTarget
@@ -243,6 +334,77 @@ export default function Chat() {
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  // Update onSubmit to check wsReady state
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || isLoading || isLimitReached()) return
+    if (!wsReady) {
+      console.error('WebSocket is not ready')
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        content: "Connection to server not ready. Please try again in a moment.",
+        role: "assistant",
+        thinking: "",
+        isThinkingExpanded: false,
+        isThinking: false
+      }])
+      return
+    }
+
+    setIsLoading(true)
+    setElapsedTime(0)
+    setQuestionCount(prev => prev + 1)
+
+    const tempId = crypto.randomUUID()
+    // Add user message with empty thinking
+    const userMessage: Message = {
+      id: tempId,
+      content: input.trim(),
+      role: "user",
+      thinking: "",
+      isThinkingExpanded: true,
+      isThinking: true,
+      thinkingStartTime: Date.now()
+    }
+    setMessages((prev) => [...prev, userMessage])
+    setInput("")
+
+    // Keep focus on input
+    inputRef.current?.focus()
+
+    // Send message through WebSocket
+    wsRef.current?.send(JSON.stringify({
+      message: input.trim(),
+      conversation_id: conversationId
+    }))
+  }
+
+  // Update example questions handler to check wsReady state
+  const handleExampleQuestion = (question: string) => {
+    if (isLimitReached() || isLoading) return
+    
+    const tempId = crypto.randomUUID()
+    const userMessage: Message = {
+      id: tempId,
+      content: question,
+      role: "user",
+      thinking: "",
+      isThinkingExpanded: true,
+      isThinking: true,
+      thinkingStartTime: Date.now()
+    }
+    setMessages(prev => [...prev, userMessage])
+    setInput("")
+    setIsLoading(true)
+    setElapsedTime(0)
+    setQuestionCount(prev => prev + 1)
+    
+    wsRef.current?.send(JSON.stringify({
+      message: question,
+      conversation_id: conversationId
+    }))
+  }
 
   return (
     <div className="flex flex-col h-screen bg-background">
@@ -290,86 +452,18 @@ export default function Chat() {
                       <>
                         <MarkdownRenderer content={message.content} />
                         {message.id === "welcome" && (
-                          <div className={`mt-6 flex flex-col gap-3 ${isLimitReached() ? 'opacity-50 pointer-events-none' : ''}`}>
+                          <div className={`mt-6 flex flex-col gap-3 ${isLimitReached() || isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
                             {EXAMPLE_QUESTIONS.map((question, index) => (
                               <Button
                                 key={index}
                                 variant="ghost"
                                 className="w-full h-12 justify-start text-left border-2 border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-all text-gray-600 hover:text-blue-700 rounded-lg shadow-sm"
-                                onClick={() => {
-                                  if (isLimitReached()) return;
-                                  const fakeEvent = { preventDefault: () => {} } as React.FormEvent
-                                  const question = EXAMPLE_QUESTIONS[index]
-                                  // Create and submit user message directly
-                                  const tempId = crypto.randomUUID()
-                                  const userMessage: Message = {
-                                    id: tempId,
-                                    content: question,
-                                    role: "user",
-                                    thinking: "",
-                                    isThinkingExpanded: true,
-                                    isThinking: true,
-                                    thinkingStartTime: Date.now()
-                                  }
-                                  setMessages(prev => [...prev, userMessage])
-                                  setInput("")
-                                  setIsLoading(true)
-                                  setElapsedTime(0)
-                                  setQuestionCount(prev => prev + 1)
-                                  
-                                  // Call API directly
-                                  axios.post(`${BACKEND_URL}/chat`, {
-                                    message: question,
-                                    conversation_id: conversationId
-                                  })
-                                  .then(response => {
-                                    // Update user message to stop thinking
-                                    setMessages(prev =>
-                                      prev.map(msg => msg.id === tempId ? 
-                                        { ...msg, isThinking: false, isThinkingExpanded: false } : msg
-                                      )
-                                    )
-
-                                    // Store conversation ID from first response
-                                    if (!conversationId && response.data.conversation_id) {
-                                      setConversationId(response.data.conversation_id)
-                                    }
-
-                                    // Add bot message
-                                    const botMessage: Message = {
-                                      id: crypto.randomUUID(),
-                                      content: response.data.response,
-                                      role: "assistant",
-                                      thinking: "",
-                                      isThinkingExpanded: false,
-                                      isThinking: false
-                                    }
-                                    setMessages(prev => {
-                                      setShouldAutoScroll(true)
-                                      return [...prev, botMessage]
-                                    })
-                                  })
-                                  .catch(error => {
-                                    console.error('Error calling backend:', error)
-                                    const errorMessage: Message = {
-                                      id: crypto.randomUUID(),
-                                      content: "Sorry, there was an error processing your request. Please try again.",
-                                      role: "assistant",
-                                      thinking: "",
-                                      isThinkingExpanded: false,
-                                      isThinking: false
-                                    }
-                                    setMessages(prev => [...prev, errorMessage])
-                                  })
-                                  .finally(() => {
-                                    setIsLoading(false)
-                                  })
-                                }}
-                                disabled={isLimitReached()}
+                                onClick={() => handleExampleQuestion(question)}
+                                disabled={isLimitReached() || isLoading}
                               >
                                 <div className="flex items-center w-full">
                                   <Send className="h-4 w-4 shrink-0 text-blue-500 mr-3" />
-                                  <span className="font-medium">{question}</span>
+                                  <span className={`font-medium ${isLoading ? 'text-gray-400' : ''}`}>{question}</span>
                                 </div>
                               </Button>
                             ))}
@@ -420,7 +514,7 @@ export default function Chat() {
                             }
                           }}
                         >
-                          {message.thinking || (message.isThinking ? "Thinking...\n\n[Demo Mode] Quá trình phân tích phải:\n- Truy xuất dữ liệu thị trường\n- Phân tích báo cáo tài chính\n- Tìm kiếm internet: đánh giá xu hướng ngành & kinh tế vĩ mô \n\nThời gian phản hồi có thể kéo dài tới 10-120s \n" : "")}
+                          {message.thinking || (message.isThinking && !message.thinking ? "Đang xử lý..." : "")}
                         </div>
                       </CollapsibleContent>
                     </CardContent>
