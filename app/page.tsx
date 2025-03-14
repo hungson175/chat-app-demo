@@ -11,6 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import axios from 'axios'
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer"
+import { usePlausible } from 'next-plausible'
 
 type Message = {
   id: string
@@ -49,6 +50,7 @@ const EXAMPLE_QUESTIONS = [
 const MAX_QUESTIONS = 8
 
 export default function Chat() {
+  const plausible = usePlausible()
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -335,7 +337,16 @@ export default function Chat() {
     inputRef.current?.focus()
   }, [])
 
-  // Update onSubmit to check wsReady state
+  // Track session start for retention analysis
+  useEffect(() => {
+    plausible('session_start', {
+      props: {
+        timestamp: new Date().toISOString()
+      }
+    })
+  }, [plausible])
+
+  // Update onSubmit to track user activation
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isLoading || isLimitReached()) return
@@ -351,6 +362,14 @@ export default function Chat() {
       }])
       return
     }
+
+    // Track user activation
+    plausible('user_activated', {
+      props: {
+        source: 'manual_input',
+        timestamp: new Date().toISOString()
+      }
+    })
 
     setIsLoading(true)
     setElapsedTime(0)
@@ -380,10 +399,18 @@ export default function Chat() {
     }))
   }
 
-  // Update example questions handler to check wsReady state
+  // Update example questions handler to track user activation
   const handleExampleQuestion = (question: string) => {
     if (isLimitReached() || isLoading) return
     
+    // Track user activation
+    plausible('user_activated', {
+      props: {
+        source: 'example_question',
+        timestamp: new Date().toISOString()
+      }
+    })
+
     const tempId = crypto.randomUUID()
     const userMessage: Message = {
       id: tempId,

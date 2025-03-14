@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import PlausibleProvider from 'next-plausible'
 
 export const metadata: Metadata = {
   title: 'SonPH - Tư vấn đầu tư chứng khoán dài hạn',
@@ -14,6 +15,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <PlausibleProvider domain="chat-app-demo-sp7a.onrender.com" />
+      </head>
       <body>{children}</body>
     </html>
   )
