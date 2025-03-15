@@ -24,10 +24,9 @@ type Message = {
 }
 
 // Add this constant at the top level
-// const BACKEND_URL = 'https://fin-demo.xyz'
-const BACKEND_URL = 'http://localhost:8000'
-// const WS_URL = 'ws://localhost:8000/ws/chat'
-const WS_URL = 'wss://fin-demo.xyz/ws/chat'
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws/chat'
+// const WS_URL = 'wss://fin-demo.xyz/ws/chat'
 const BOT_NAME = 'LTI-Bot'
 const MAX_RETRIES = 3
 const RETRY_DELAY = 1000

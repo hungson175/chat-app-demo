@@ -3,7 +3,7 @@ import './globals.css'
 import PlausibleProvider from 'next-plausible'
 
 export const metadata: Metadata = {
-  title: 'SonPH - Tư vấn đầu tư chứng khoán dài hạn',
+  title: 'Tư vấn đầu tư chứng khoán dài hạn',
   description: 'Tư vấn đầu tư chứng khoán dài hạn',
   generator: 'v0.dev & Cursor IDE',
 }
