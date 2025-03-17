@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import axios from 'axios'
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer"
 import { usePlausible } from 'next-plausible'
+import { trackMessageSent } from '@/lib/mixpanel'
 
 type Message = {
   id: string
@@ -362,13 +363,20 @@ export default function Chat() {
       return
     }
 
-    // Track user activation
+    // Track user activation in Plausible
     plausible('user_activated', {
       props: {
         source: 'manual_input',
         timestamp: new Date().toISOString()
       }
     })
+
+    // Track message sent in Mixpanel
+    trackMessageSent({
+      source: 'manual_input',
+      message_length: input.trim().length,
+      conversation_id: conversationId
+    });
 
     setIsLoading(true)
     setElapsedTime(0)
@@ -402,13 +410,20 @@ export default function Chat() {
   const handleExampleQuestion = (question: string) => {
     if (isLimitReached() || isLoading) return
     
-    // Track user activation
+    // Track user activation in Plausible
     plausible('user_activated', {
       props: {
         source: 'example_question',
         timestamp: new Date().toISOString()
       }
     })
+
+    // Track message sent in Mixpanel
+    trackMessageSent({
+      source: 'example_question',
+      message_length: question.length,
+      conversation_id: conversationId
+    });
 
     const tempId = crypto.randomUUID()
     const userMessage: Message = {
