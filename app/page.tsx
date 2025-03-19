@@ -331,7 +331,8 @@ export default function Chat() {
   // Effect to show limit dialog when max questions reached
   useEffect(() => {
     if (isLimitReached()) {
-      setShowLimitDialog(true)
+      // Remove auto-showing dialog here
+      // setShowLimitDialog(true)
     }
   }, [questionCount])
 
@@ -352,9 +353,21 @@ export default function Chat() {
   // Update onSubmit to track user activation
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isLoading || isLimitReached()) return
+    if (!input.trim() || isLoading) return
+    
+    // Show limit dialog if reached and trying to submit
+    if (isLimitReached()) {
+      setShowLimitDialog(true)
+      return
+    }
+
     if (!wsReady) {
       console.error('WebSocket is not ready')
+      toast({
+        title: "Connection error",
+        description: "Connection to server not ready. Please try again in a moment.",
+        duration: 2000,
+      })
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         content: "Connection to server not ready. Please try again in a moment.",
@@ -411,8 +424,14 @@ export default function Chat() {
 
   // Update example questions handler to track user activation
   const handleExampleQuestion = (question: string) => {
-    if (isLimitReached() || isLoading) return
+    if (isLoading) return
     
+    // Show limit dialog if reached and trying to use example question
+    if (isLimitReached()) {
+      setShowLimitDialog(true)
+      return
+    }
+
     // Track user activation in Plausible
     plausible('user_activated', {
       props: {
@@ -530,7 +549,14 @@ export default function Chat() {
                               <Button
                                 variant="ghost"
                                 className="h-8 px-2 rounded hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-0 focus-visible:ring-0"
-                                onClick={() => handleCopyContent(message.content)}
+                                onClick={() => {
+                                  handleCopyContent(message.content)
+                                  toast({
+                                    title: "Copied to clipboard",
+                                    description: "Content has been copied to your clipboard",
+                                    duration: 2000,
+                                  })
+                                }}
                               >
                                 <Copy className="h-4 w-4 mr-1" />
                                 <span className="text-sm">Copy</span>
@@ -539,7 +565,14 @@ export default function Chat() {
                               <Button
                                 variant="ghost"
                                 className="h-8 px-2 rounded hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-0 focus-visible:ring-0"
-                                onClick={handleThumbsUp}
+                                onClick={() => {
+                                  handleThumbsUp()
+                                  toast({
+                                    title: "Thanks for your feedback!",
+                                    description: "We're glad this was helpful",
+                                    duration: 2000,
+                                  })
+                                }}
                               >
                                 <ThumbsUp className="h-4 w-4 mr-1" />
                                 <span className="text-sm">Helpful</span>
@@ -547,7 +580,14 @@ export default function Chat() {
                               <Button
                                 variant="ghost"
                                 className="h-8 px-2 rounded hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-0 focus-visible:ring-0"
-                                onClick={handleThumbsDown}
+                                onClick={() => {
+                                  handleThumbsDown()
+                                  toast({
+                                    title: "Thanks for your feedback!",
+                                    description: "We'll work on improving our responses",
+                                    duration: 2000,
+                                  })
+                                }}
                               >
                                 <ThumbsDown className="h-4 w-4 mr-1" />
                                 <span className="text-sm">Not helpful</span>
@@ -632,22 +672,28 @@ export default function Chat() {
       </div>
 
       {/* Input Area */}
-      <div className={`p-4 border-t ${isLimitReached() ? 'opacity-50' : ''}`}>
+      <div className="p-4 border-t">
         <form onSubmit={onSubmit} className="max-w-3xl mx-auto flex items-center gap-3">
           <Input
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value)
+              // Show limit dialog if reached and user starts typing
+              if (isLimitReached() && e.target.value.trim()) {
+                setShowLimitDialog(true)
+              }
+            }}
             placeholder={`How can ${BOT_NAME} help?`}
             className="flex-1 text-base px-4 h-14"
-            disabled={isLoading || isLimitReached()}
+            disabled={isLoading}
           />
           <Button 
             type="submit" 
             variant="ghost" 
             size="icon"
             className="h-14 w-14 shrink-0 flex items-center justify-center" 
-            disabled={isLoading || !input.trim() || isLimitReached()}
+            disabled={isLoading || !input.trim()}
           >
             {isLoading ? (
               <Loader2 className="h-6 w-6 animate-spin" />
