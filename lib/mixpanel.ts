@@ -1,14 +1,17 @@
 import mixpanel from 'mixpanel-browser';
 import FingerprintJS from '@fingerprintjs/fingerprintjs';
 
+// Check if we're in a browser environment
+const isBrowser = typeof window !== 'undefined';
+
 // Immediate logging to check if the file is loaded
 console.log('[Debug] Mixpanel file loaded, token:', process.env.NEXT_PUBLIC_MIXPANEL_TOKEN ? 'Present' : 'Missing');
 
 const MIXPANEL_TOKEN = process.env.NEXT_PUBLIC_MIXPANEL_TOKEN;
 const IS_DEVELOPMENT = process.env.NODE_ENV === 'development';
 
-// Initialize FingerprintJS
-const fpPromise = FingerprintJS.load();
+// Initialize FingerprintJS only in browser environment
+const fpPromise = isBrowser ? FingerprintJS.load() : null;
 
 // Helper function for consistent logging across environments
 const logEvent = (type: string, message: string, data?: any) => {
@@ -23,6 +26,9 @@ const logEvent = (type: string, message: string, data?: any) => {
 
 // Initialize Mixpanel
 export const initMixpanel = async () => {
+  // Only initialize in browser environment
+  if (!isBrowser) return false;
+
   console.log('[Debug] initMixpanel called');
   
   logEvent('Init', 'Starting Mixpanel initialization', {
@@ -35,7 +41,7 @@ export const initMixpanel = async () => {
     const error = 'Mixpanel token is missing! Check your environment variables.';
     console.error('[Debug] ' + error);
     logEvent('Error', error);
-    return;
+    return false;
   }
 
   try {
@@ -52,6 +58,11 @@ export const initMixpanel = async () => {
     console.log('[Debug] Mixpanel.init completed, loading FingerprintJS...');
 
     // Get visitor identifier using FingerprintJS
+    if (!fpPromise) {
+      console.warn('[Debug] FingerprintJS not initialized (non-browser environment)');
+      return false;
+    }
+
     const fp = await fpPromise;
     const result = await fp.get();
     const visitorId = result.visitorId;
@@ -85,6 +96,9 @@ export const initMixpanel = async () => {
 
 // Track message sent event with debug logging
 export const trackMessageSent = (messageData: any) => {
+  // Only track in browser environment
+  if (!isBrowser) return;
+
   try {
     logEvent('Track', 'Attempting to track message', messageData);
 
@@ -100,19 +114,17 @@ export const trackMessageSent = (messageData: any) => {
   }
 };
 
-// Helper function to track any custom event
+// Generic track function
 export const track = (eventName: string, properties?: any) => {
-  try {
-    logEvent('Track', `Attempting to track event: ${eventName}`, properties);
+  // Only track in browser environment
+  if (!isBrowser) return;
 
+  try {
     mixpanel.track(eventName, {
       timestamp: new Date().toISOString(),
-      hostname: window.location.hostname,
       ...properties
     });
-
-    logEvent('Success', `Event ${eventName} tracked successfully`);
   } catch (error) {
-    logEvent('Error', `Failed to track event ${eventName}`, error);
+    console.error('Failed to track event:', error);
   }
 }; 

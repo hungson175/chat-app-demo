@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { ChevronDown, Lightbulb, Mic, Plus, Search, Loader2, Send } from "lucide-react"
+import { ChevronDown, Lightbulb, Mic, Plus, Search, Loader2, Send, Copy, ThumbsUp, ThumbsDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -13,6 +13,8 @@ import axios from 'axios'
 import { MarkdownRenderer } from "@/app/components/MarkdownRenderer"
 import { usePlausible } from 'next-plausible'
 import { trackMessageSent } from '@/lib/mixpanel'
+import { useToast } from "@/hooks/use-toast"
+import { Toaster } from "@/components/ui/toaster"
 
 type Message = {
   id: string
@@ -51,6 +53,7 @@ const MAX_QUESTIONS = 8
 
 export default function Chat() {
   const plausible = usePlausible()
+  const { toast } = useToast()
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -447,6 +450,33 @@ export default function Chat() {
     }))
   }
 
+  const handleCopyContent = (content: string) => {
+    navigator.clipboard.writeText(content)
+    toast({
+      title: "Copied to clipboard",
+      description: "Content has been copied to your clipboard",
+      duration: 2000,
+    })
+  }
+
+  const handleThumbsUp = () => {
+    // Stub for thumbs up functionality
+    toast({
+      title: "Thanks for your feedback!",
+      description: "We're glad this was helpful",
+      duration: 2000,
+    })
+  }
+
+  const handleThumbsDown = () => {
+    // Stub for thumbs down functionality
+    toast({
+      title: "Thanks for your feedback!",
+      description: "We'll work on improving our responses",
+      duration: 2000,
+    })
+  }
+
   return (
     <div className="flex flex-col h-screen bg-background">
       {/* Header */}
@@ -491,7 +521,40 @@ export default function Chat() {
                       <span className="whitespace-pre-wrap text-base">{message.content}</span>
                     ) : (
                       <>
-                        <MarkdownRenderer content={message.content} />
+                        <div className="flex flex-col">
+                          <div className="flex-1">
+                            <MarkdownRenderer content={message.content} />
+                          </div>
+                          {message.id !== "welcome" && (
+                            <div className="flex items-center justify-end gap-1 mt-4 border-t pt-3">
+                              <Button
+                                variant="ghost"
+                                className="h-8 px-2 rounded hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-0 focus-visible:ring-0"
+                                onClick={() => handleCopyContent(message.content)}
+                              >
+                                <Copy className="h-4 w-4 mr-1" />
+                                <span className="text-sm">Copy</span>
+                              </Button>
+                              <div className="h-4 w-px bg-gray-200 mx-1" />
+                              <Button
+                                variant="ghost"
+                                className="h-8 px-2 rounded hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-0 focus-visible:ring-0"
+                                onClick={handleThumbsUp}
+                              >
+                                <ThumbsUp className="h-4 w-4 mr-1" />
+                                <span className="text-sm">Helpful</span>
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                className="h-8 px-2 rounded hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus:ring-0 focus-visible:ring-0"
+                                onClick={handleThumbsDown}
+                              >
+                                <ThumbsDown className="h-4 w-4 mr-1" />
+                                <span className="text-sm">Not helpful</span>
+                              </Button>
+                            </div>
+                          )}
+                        </div>
                         {message.id === "welcome" && (
                           <div className={`mt-6 flex flex-col gap-3 ${isLimitReached() || isLoading ? 'opacity-50 pointer-events-none' : ''}`}>
                             {EXAMPLE_QUESTIONS.map((question, index) => (
@@ -614,6 +677,9 @@ export default function Chat() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Toast notifications */}
+      <Toaster />
     </div>
   )
 }
