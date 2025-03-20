@@ -71,6 +71,7 @@ export default function Chat() {
   const [conversationId, setConversationId] = useState<string | undefined>()
   const [questionCount, setQuestionCount] = useState(0)
   const [showLimitDialog, setShowLimitDialog] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(true)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<NodeJS.Timeout>()
@@ -81,8 +82,12 @@ export default function Chat() {
 
   // Initialize WebSocket connection
   const connectWebSocket = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setIsConnecting(false)
+      return
+    }
 
+    setIsConnecting(true)
     console.log('Attempting to connect to WebSocket...')
     const ws = new WebSocket(WS_URL)
     wsRef.current = ws
@@ -90,12 +95,14 @@ export default function Chat() {
     ws.onopen = () => {
       console.log('WebSocket connected')
       setWsReady(true)
+      setIsConnecting(false)
       reconnectAttempts.current = 0
     }
 
     ws.onclose = () => {
       console.log('WebSocket closed')
       setWsReady(false)
+      setIsConnecting(true)
       wsRef.current = null
 
       // Attempt to reconnect if we haven't exceeded max retries
@@ -103,16 +110,18 @@ export default function Chat() {
         reconnectAttempts.current += 1
         console.log(`Reconnecting... Attempt ${reconnectAttempts.current}`)
         setTimeout(connectWebSocket, RETRY_DELAY)
+      } else {
+        setIsConnecting(false)
+        toast({
+          title: "Connection Failed",
+          description: "Could not connect to server after multiple attempts. Please try again later.",
+          duration: 5000,
+        })
       }
     }
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data)
-      console.log('[WebSocket] Received message:', {
-        type: data.type,
-        content: data.type === 'thinking' ? data.content.substring(0, 50) + '...' : 'final response',
-        timestamp: new Date().toISOString()
-      })
       
       switch (data.type) {
         case 'thinking':
@@ -120,15 +129,8 @@ export default function Chat() {
           setMessages(prev => {
             // Find the last message that is currently thinking
             const lastMessage = prev[prev.length - 1]
-            console.log('[Thinking Update] Current state:', {
-              lastMessageId: lastMessage?.id,
-              isThinking: lastMessage?.isThinking,
-              existingThinking: lastMessage?.thinking?.split('\n').length || 0,
-              newContent: data.content.substring(0, 50) + '...'
-            })
             
             if (!lastMessage || !lastMessage.isThinking) {
-              console.warn('[Thinking Update] No thinking message found or message not in thinking state')
               return prev
             }
             
@@ -137,11 +139,6 @@ export default function Chat() {
                 // Only update the most recent message
                 const currentThinking = msg.thinking || ""
                 const newThinking = data.content.trim()
-                console.log('[Thinking Update] Updating message:', {
-                  messageId: msg.id,
-                  currentThinkingLines: currentThinking.split('\n').length,
-                  newContentLength: newThinking.length
-                })
                 return {
                   ...msg,
                   thinking: currentThinking + (currentThinking ? "\n" : "") + newThinking
@@ -153,11 +150,6 @@ export default function Chat() {
           break
           
         case 'final':
-          console.log('[Final Response] Processing final response', {
-            conversationId: data.conversation_id,
-            contentPreview: data.content.substring(0, 50) + '...'
-          })
-          
           // Store conversation_id for next messages
           if (data.conversation_id) {
             setConversationId(data.conversation_id)
@@ -166,20 +158,12 @@ export default function Chat() {
           // Update the last user message to stop thinking
           setMessages(prev => {
             const lastUserMessageIndex = [...prev].reverse().findIndex(m => m.role === 'user' && m.isThinking)
-            console.log('[Final Response] Finding last thinking message:', {
-              messageFound: lastUserMessageIndex !== -1,
-              totalMessages: prev.length
-            })
             
             if (lastUserMessageIndex === -1) return prev
             
             const actualIndex = prev.length - 1 - lastUserMessageIndex
             const newMessages = prev.map((msg, idx) => {
               if (idx === actualIndex) {
-                console.log('[Final Response] Stopping thinking for message:', {
-                  messageId: msg.id,
-                  thinkingContent: msg.thinking?.split('\n').length || 0
-                })
                 return {
                   ...msg,
                   isThinking: false,
@@ -265,17 +249,9 @@ export default function Chat() {
 
   // Toggle thinking expanded state for a message
   const toggleThinking = (messageId: string) => {
-    console.log("toggleThinking CALLED - messageId:", messageId)
     setMessages(
       messages.map((msg) => {
-        const newMsg = msg.id === messageId ? { ...msg, isThinkingExpanded: !msg.isThinkingExpanded } : msg
-        console.log(
-          "toggleThinking - isThinkingExpanded TOGGLED for messageId:",
-          messageId,
-          "to:",
-          newMsg.isThinkingExpanded,
-        )
-        return newMsg
+        return msg.id === messageId ? { ...msg, isThinkingExpanded: !msg.isThinkingExpanded } : msg
       }),
     )
   }
@@ -498,6 +474,21 @@ export default function Chat() {
 
   return (
     <div className="flex flex-col h-screen bg-background">
+      {/* Connection Overlay */}
+      {isConnecting && (
+        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-background p-8 rounded-xl shadow-lg flex flex-col items-center gap-4 max-w-md mx-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <h2 className="text-xl font-semibold">Connecting to server...</h2>
+            <p className="text-muted-foreground text-center">
+              {reconnectAttempts.current > 0 
+                ? `Reconnection attempt ${reconnectAttempts.current} of ${MAX_RETRIES}...`
+                : 'Establishing secure connection...'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="flex items-center justify-between p-4 border-b">
         <div className="text-xl font-bold">{BOT_NAME}</div>
@@ -626,7 +617,6 @@ export default function Chat() {
                       <CollapsibleTrigger
                         asChild
                         onClick={() => {
-                          console.log("CollapsibleTrigger onClick - messageId:", message.id)
                           if (!message.isThinking) {
                             toggleThinking(message.id)
                           }
